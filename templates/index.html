@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Flask WebRTC – Two‑person video room</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <h1>Flask WebRTC Demo</h1>
+
+  <div id="room-selection">
+    <input id="room-input" type="text" placeholder="Enter a room name">
+    <button id="join-btn">Join room</button>
+  </div>
+
+  <div id="video-container" style="display:none;">
+    <video id="localVideo" autoplay muted playsinline></video>
+    <video id="remoteVideo" autoplay playsinline></video>
+    <p>Room: <span id="room-label"></span></p>
+    <button id="leave-btn">Leave room</button>
+  </div>
+
+  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"
+          integrity="sha384-mZLF4UVrpi/QTWPA7BjNPEnkIfRFn4ZEO3Qt/HFklTJBj/gBOV8G3HcKn4NfQblz"
+          crossorigin="anonymous"></script>
+  <script src="{{ url_for('static', filename='main.js') }}"></script>
+</body>
+</html>
