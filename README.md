@@ -12,6 +12,7 @@
 - [Testing the STUN server independently](#testing-the-stun-server-independently)
 - [Multi‑person (3+ peers) walkthrough](#multi‑person-3‑peers-walkthrough)
 - [Scaling beyond a mesh – brief notes on SFU/TURN](#scaling-beyond-a-mesh‑brief-notes-on-sfuturn)
+- [Using TURN with coturn](#using-turn-with-coturn)
 - [Troubleshooting](#troubleshooting)
 - [License](#license)
 
@@ -161,6 +162,68 @@ Popular open‑source SFUs you can plug in:
 - `LiveKit` (Go + hosted SaaS option)
 
 If NAT traversal fails (e.g., symmetric NATs, firewalls), you also need a **TURN** server that can *relay* media. The demo already includes a public TURN (`turn:openrelay.metered.ca:80`). For production you should run your own `coturn` instance and add it to the `iceServers` list in `static/main.js`.
+
+## Using TURN with coturn
+### What TURN does for you
+- **Relays media** when direct peer‑to‑peer UDP cannot be established (e.g., symmetric NATs, corporate firewalls, or UDP blocked).
+- Works over **UDP, TCP, or TLS‑over‑TCP**, so you can fallback to a transport that is allowed by the network.
+- Provides a reliable fallback: ICE will try host → STUN → TURN candidates in that order and stop as soon as a pair succeeds.
+
+### Installing coturn
+```bash
+# On Debian/Ubuntu
+sudo apt-get update
+sudo apt-get install coturn
+```
+On other Linux distributions use the appropriate package manager or build from source (see https://github.com/coturn/coturn).
+
+### Minimal coturn configuration for a quick test
+Create `/etc/turnserver.conf` (or `/usr/local/etc/turnserver.conf`) with the essentials:
+```
+listening-port=3478
+listening-ip=0.0.0.0               # listen on all interfaces
+relay-ip=YOUR_PUBLIC_IP            # the public IP that clients will use
+min-port=50000
+max-port=60000
+realm=webrtc-demo                # arbitrary string, must match client config
+# Simple long‑term credential (username:password)
+user=webrtcuser:webrtcpassword
+no-ssl                             # for UDP/TCP only (remove for TLS)
+no-tlsv1                          # disable old TLS versions
+no-dtls                           # disable DTLS (optional)
+log-file=/var/log/turnserver.log
+simple-log
+```
+**Important:** In a real deployment you should enable TLS/DTLS and use secure long‑term credentials or an OATH‑based mechanism. The above is only for quick local testing.
+
+Start the TURN server:
+```bash
+sudo turnserver -c /etc/turnserver.conf -v
+```
+You should see log lines like `TURN server started on port 3478`.
+
+### Adding your coturn to the WebRTC client
+Edit `static/main.js` – replace (or add) the TURN entry in the `iceServers` array:
+```js
+const configuration = {
+  iceServers: [
+    { urls: "stun:stun.l.google.com:19302" },
+    {
+      urls: "turn:YOUR_PUBLIC_IP:3478",
+      username: "webrtcuser",
+      credential: "webrtcpassword"
+    }
+  ]
+};
+```
+Make sure the **public IP** is reachable from the clients (it can be a domain name that resolves to the public IP). If you enabled TLS, use `turns:` instead of `turn:` and provide `credential` as before.
+
+### Verifying TURN is being used
+Open the browser console (F12) and look for ICE candidate lines. You will see candidates that start with `relay` (e.g., `candidate:1 1 UDP 34200 <TURN_IP> 3478 typ relay raddr <private_ip> rport <private_port>`). When the `relay` candidates are selected, you know media is flowing **through** the TURN server.
+
+### Bandwidth considerations
+- TURN relays **all** media, so the bandwidth of your TURN instance must be sized for the expected number of concurrent streams.
+- For a demo you can run coturn on a modest VM, but production services usually use a dedicated TURN cluster or a hosted service (e.g., Twilio, Xirsys, or LiveKit cloud).
 
 ## Troubleshooting
 | Symptom | Likely cause | Fix |
