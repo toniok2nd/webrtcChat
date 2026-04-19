@@ -1,11 +1,9 @@
 /* ----------------------------------------------------------------------
-   Updated main.js – fixes "Cannot set remote answer in state stable"
-   --------------------------------------------------------------- */
+   Multi‑person WebRTC demo (full‑mesh) – updated main.js
+----------------------------------------------------------------------- */
 const socket = io();                 // connect to the Flask‑SocketIO server
 let localStream = null;
-let peerConn = null;
 let currentRoom = null;
-let isInitiator = false;   // true for the peer that creates the first offer
 
 // ----------------------------------------------------------------------
 // ICE configuration – includes a public TURN (demo). Replace with your own TURN for prod.
@@ -21,8 +19,11 @@ const configuration = {
   ]
 };
 
+// ----------------------------------------------------------------------
+// UI elements
+// ----------------------------------------------------------------------
 const localVideo   = document.getElementById("localVideo");
-const remoteVideo  = document.getElementById("remoteVideo");
+const remoteContainer = document.getElementById("remoteContainer"); // will hold a video per remote peer
 const joinBtn      = document.getElementById("join-btn");
 const leaveBtn     = document.getElementById("leave-btn");
 const roomInput    = document.getElementById("room-input");
@@ -30,9 +31,9 @@ const roomLabel    = document.getElementById("room-label");
 const videoContainer = document.getElementById("video-container");
 const roomSelection  = document.getElementById("room-selection");
 
-/* ----------------------------------------------------------------------
-   Helper – get webcam + mic
------------------------------------------------------------------------ */
+// ----------------------------------------------------------------------
+// Helper – acquire webcam/mic
+// ----------------------------------------------------------------------
 async function startLocalMedia() {
   try {
     localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
@@ -43,177 +44,269 @@ async function startLocalMedia() {
   }
 }
 
-/* ----------------------------------------------------------------------
-   Build a fresh RTCPeerConnection and hook event listeners
------------------------------------------------------------------------ */
-function createPeerConnection() {
+// ----------------------------------------------------------------------
+// Data structures for the full‑mesh
+// ----------------------------------------------------------------------
+// peers[sid] = { pc: RTCPeerConnection, video: HTMLVideoElement }
+const peers = {};
+
+/**
+ * Create a new RTCPeerConnection for a remote participant identified by `sid`.
+ * Also create a <video> element for that peer and attach it to the DOM.
+ */
+function createPeerConnection(sid) {
   const pc = new RTCPeerConnection(configuration);
 
-  // Add all local tracks
-  localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
+  // ---- attach our local tracks to this connection ----
+  if (localStream) {
+    localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
+  }
 
-  // Remote‑track handling – robust against separate audio/video events
-  pc.addEventListener("track", ev => {
-    const remoteStream = ev.streams[0];
-    if (remoteVideo.srcObject) {
-      remoteStream.getTracks().forEach(t => {
-        if (!remoteVideo.srcObject.getTracks().some(et => et.id === t.id)) {
-          remoteVideo.srcObject.addTrack(t);
+  // ---- video element for the remote stream ----
+  const video = document.createElement('video');
+  video.autoplay = true;
+  video.playsInline = true;
+  video.id = `remote-${sid}`;
+  remoteContainer.appendChild(video);
+
+  // When a remote track arrives, attach its stream to this video element.
+  pc.addEventListener('track', ev => {
+    // Most browsers fire a separate 'track' event for each track.
+    // We simply set the srcObject the first time we get a stream.
+    if (!video.srcObject) {
+      video.srcObject = ev.streams[0];
+    } else {
+      // If additional tracks arrive later, add them to the existing stream.
+      ev.streams[0].getTracks().forEach(t => {
+        if (!video.srcObject.getTracks().some(et => et.id === t.id)) {
+          video.srcObject.addTrack(t);
         }
       });
-    } else {
-      remoteVideo.srcObject = remoteStream;
     }
   });
 
-  // ICE candidate forwarding
-  pc.addEventListener("icecandidate", ({ candidate }) => {
+  // Forward ICE candidates to the other side – we include the target SID in the payload.
+  pc.addEventListener('icecandidate', ({ candidate }) => {
     if (candidate) {
-      socket.emit("signal", {
+      socket.emit('signal', {
         room: currentRoom,
-        type: "ice",
+        type: 'ice',
+        target: sid,               // tell the server which peer should receive it
         payload: candidate
       });
     }
   });
 
-  // Log ICE state for debugging
-  pc.addEventListener("iceconnectionstatechange", () => {
-    console.log("ICE connection state:", pc.iceConnectionState);
+  // Optional: log ICE state changes for debugging
+  pc.addEventListener('iceconnectionstatechange', () => {
+    console.log(`ICE state for ${sid}:`, pc.iceConnectionState);
   });
 
-  return pc;
+  return { pc, video };
 }
 
-/* ----------------------------------------------------------------------
-   UI – Join a room
------------------------------------------------------------------------ */
+/**
+ * Clean up a peer when they leave the room.
+ */
+function removePeer(sid) {
+  const entry = peers[sid];
+  if (!entry) return;
+  // Close the RTCPeerConnection
+  entry.pc.close();
+  // Remove the video element from the DOM
+  if (entry.video && entry.video.parentNode) {
+    entry.video.parentNode.removeChild(entry.video);
+  }
+  delete peers[sid];
+}
+
+// ----------------------------------------------------------------------
+// UI – Join a room
+// ----------------------------------------------------------------------
 joinBtn.onclick = async () => {
   const room = roomInput.value.trim();
-  if (!room) { alert("Please enter a room name."); return; }
+  if (!room) { alert('Please enter a room name.'); return; }
 
   currentRoom = room;
   roomLabel.textContent = room;
-  roomSelection.style.display = "none";
-  videoContainer.style.display = "block";
+  roomSelection.style.display = 'none';
+  videoContainer.style.display = 'block';
 
   await startLocalMedia();
-  peerConn = createPeerConnection();
 
-  // Tell server we want to join
-  socket.emit("join", { room });
+  // Tell the server we want to join the room
+  socket.emit('join', { room });
 
-  // ---------------------------------------------------------------
-  // Listener for when another participant is already present.
-  // In that case we become the initiator (caller) and create an offer.
-  // ---------------------------------------------------------------
-  socket.off("joined");
-  socket.on("joined", data => {
-    if (data.sid !== socket.id) {
-      console.log("Another participant already in room – becoming initiator");
-      isInitiator = true;
-      createAndSendOffer();
-    }
+  // Listen for other participants joining (including ourselves)
+  socket.off('joined');
+  socket.on('joined', data => {
+    const remoteSid = data.sid;
+    if (remoteSid === socket.id) return; // ignore our own broadcast
+
+    // A new participant is present – create a connection for them.
+    const { pc, video } = createPeerConnection(remoteSid);
+    peers[remoteSid] = { pc, video };
+
+    // As soon as we learn about a remote peer, we become the caller for that peer.
+    // (We will send an offer immediately.)
+    createAndSendOffer(remoteSid);
   });
 
-  // ---------------------------------------------------------------
-  // Listener for the "ready" event – the server emits this when the
-  // room reaches two participants. This handles the case where *we*
-  // are the first user that created the room.
-  // ---------------------------------------------------------------
-  socket.off("ready");
-  socket.on("ready", () => {
-    console.log("Room ready – becoming initiator");
-    isInitiator = true;
-    createAndSendOffer();
+  // When the server says the room now has two participants we also become a caller.
+  // This handles the case where *we* are the first user who created the room.
+  socket.off('ready');
+  socket.on('ready', () => {
+    // The "ready" event does not carry a specific SID, because we are the only
+    // participant that just joined and there is already someone else in the room.
+    // The other participant(s) have already sent us a "joined" event, so the
+    // offers for them have been created there. Nothing else is required here.
+    console.log('Room ready – we are the second participant (or later).');
+  });
+
+  // When a remote participant leaves, clean up.
+  socket.off('left');
+  socket.on('left', data => {
+    const sid = data.sid;
+    console.log('Participant left:', sid);
+    removePeer(sid);
   });
 };
 
-/* ----------------------------------------------------------------------
-   UI – Leave a room
------------------------------------------------------------------------ */
+// ----------------------------------------------------------------------
+// UI – Leave the room (close everything)
+// ----------------------------------------------------------------------
 leaveBtn.onclick = () => {
-  if (peerConn) { peerConn.close(); peerConn = null; }
-  if (localStream) { localStream.getTracks().forEach(t => t.stop()); localStream = null; }
-  remoteVideo.srcObject = null;
+  // Close all peer connections and remove their video elements.
+  Object.keys(peers).forEach(sid => removePeer(sid));
+
+  // Stop local media.
+  if (localStream) {
+    localStream.getTracks().forEach(t => t.stop());
+    localStream = null;
+  }
   localVideo.srcObject = null;
-  socket.emit("leave", { room: currentRoom });
+
+  // Notify the server.
+  socket.emit('leave', { room: currentRoom });
   currentRoom = null;
-  isInitiator = false;
-  videoContainer.style.display = "none";
-  roomSelection.style.display = "block";
-  socket.off("joined");
-  socket.off("ready");
+
+  // Reset UI.
+  videoContainer.style.display = 'none';
+  roomSelection.style.display = 'block';
+
+  // Clean up listeners so a later re‑join starts fresh.
+  socket.off('joined');
+  socket.off('ready');
+  socket.off('left');
 };
 
-/* ----------------------------------------------------------------------
-   Offer / Answer helpers – guarded against illegal state transitions
------------------------------------------------------------------------ */
-async function createAndSendOffer() {
-  // Guard: only create an offer if we are in a stable state.
-  if (peerConn.signalingState !== "stable") {
-    console.warn("Cannot create offer – signaling state not stable:", peerConn.signalingState);
+// ----------------------------------------------------------------------
+// Offer / Answer handling – note that we need the remote SID to know which
+// RTCPeerConnection we are talking to.
+// ----------------------------------------------------------------------
+async function createAndSendOffer(targetSid) {
+  const peer = peers[targetSid];
+  if (!peer) {
+    console.warn('Attempted to create offer for unknown peer', targetSid);
     return;
   }
-  const offer = await peerConn.createOffer();
-  await peerConn.setLocalDescription(offer);
-  socket.emit("signal", { room: currentRoom, type: "offer", payload: offer });
-}
-
-async function handleOffer(offer) {
-  // If we are already the initiator (have sent an offer), ignore.
-  if (peerConn.signalingState !== "stable") {
-    console.warn("Ignoring unexpected offer – signaling state:", peerConn.signalingState);
+  const pc = peer.pc;
+  // Guard – only create an offer when the connection is stable.
+  if (pc.signalingState !== 'stable') {
+    console.warn('Cannot create offer – signaling state not stable:', pc.signalingState);
     return;
   }
-  await peerConn.setRemoteDescription(new RTCSessionDescription(offer));
-  const answer = await peerConn.createAnswer();
-  await peerConn.setLocalDescription(answer);
-  socket.emit("signal", { room: currentRoom, type: "answer", payload: answer });
+  const offer = await pc.createOffer();
+  await pc.setLocalDescription(offer);
+  socket.emit('signal', {
+    room: currentRoom,
+    type: 'offer',
+    target: targetSid,
+    payload: offer
+  });
 }
 
-async function handleAnswer(answer) {
-  // Valid only when we have a local offer awaiting an answer.
-  if (peerConn.signalingState !== "have-local-offer") {
-    console.warn("Received answer in wrong state:", peerConn.signalingState);
+async function handleOffer(offer, senderSid) {
+  // If we already have a connection for this sender, use it; otherwise create one.
+  let peer = peers[senderSid];
+  if (!peer) {
+    const created = createPeerConnection(senderSid);
+    peers[senderSid] = created;
+    peer = created;
+  }
+  const pc = peer.pc;
+
+  // Guard – we must be in a stable state before we accept an incoming offer.
+  if (pc.signalingState !== 'stable') {
+    console.warn('Ignoring unexpected offer from', senderSid, 'state:', pc.signalingState);
     return;
   }
-  await peerConn.setRemoteDescription(new RTCSessionDescription(answer));
+
+  await pc.setRemoteDescription(new RTCSessionDescription(offer));
+  const answer = await pc.createAnswer();
+  await pc.setLocalDescription(answer);
+  socket.emit('signal', {
+    room: currentRoom,
+    type: 'answer',
+    target: senderSid,
+    payload: answer
+  });
 }
 
-function handleRemoteIce(candidate) {
-  // ICE may arrive before or after we have a description – just add it.
-  peerConn.addIceCandidate(new RTCIceCandidate(candidate)).catch(e => console.warn("ICE add error:", e));
+async function handleAnswer(answer, senderSid) {
+  const peer = peers[senderSid];
+  if (!peer) {
+    console.warn('Answer from unknown peer', senderSid);
+    return;
+  }
+  const pc = peer.pc;
+  // We should have a local offer waiting for an answer.
+  if (pc.signalingState !== 'have-local-offer') {
+    console.warn('Received answer in wrong state from', senderSid, pc.signalingState);
+    return;
+  }
+  await pc.setRemoteDescription(new RTCSessionDescription(answer));
 }
 
-/* ----------------------------------------------------------------------
-   Signalling channel (Socket.IO)
------------------------------------------------------------------------ */
-socket.on("signal", async msg => {
-  if (msg.sender === socket.id) return; // ignore our own messages
-  const { type, payload } = msg;
+function handleRemoteIce(candidate, senderSid) {
+  const peer = peers[senderSid];
+  if (!peer) {
+    console.warn('ICE from unknown peer', senderSid);
+    return;
+  }
+  peer.pc.addIceCandidate(new RTCIceCandidate(candidate))
+    .catch(e => console.warn('ICE add error from', senderSid, e));
+}
+
+// ----------------------------------------------------------------------
+// Signalling channel (Socket.IO)
+// ----------------------------------------------------------------------
+socket.on('signal', async msg => {
+  // The server forwards everything to all members except the sender.
+  // `msg.sender` tells us who originally sent the payload.
+  const { type, payload, sender } = msg;
   switch (type) {
-    case "offer":
-      await handleOffer(payload);
+    case 'offer':
+      await handleOffer(payload, sender);
       break;
-    case "answer":
-      await handleAnswer(payload);
+    case 'answer':
+      await handleAnswer(payload, sender);
       break;
-    case "ice":
-      await handleRemoteIce(payload);
+    case 'ice':
+      handleRemoteIce(payload, sender);
       break;
     default:
-      console.warn("Unknown signal type:", type);
+      console.warn('Unknown signal type:', type);
   }
 });
 
-socket.on("connect_error", err => {
-  console.error("Socket.IO connection error:", err);
+socket.on('connect_error', err => {
+  console.error('Socket.IO connection error:', err);
 });
 
-/* ----------------------------------------------------------------------
-   Clean‑up on page unload
------------------------------------------------------------------------ */
-window.addEventListener("beforeunload", () => {
-  if (currentRoom) socket.emit("leave", { room: currentRoom });
+// ----------------------------------------------------------------------
+// Clean‑up on page unload (in case the user closes the tab without clicking Leave)
+// ----------------------------------------------------------------------
+window.addEventListener('beforeunload', () => {
+  if (currentRoom) socket.emit('leave', { room: currentRoom });
 });
