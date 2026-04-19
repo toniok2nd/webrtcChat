@@ -1,3 +1,5 @@
 VENV/
 certs/
+.hello
 *log
+.historyList.json
