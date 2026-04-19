@@ -135,15 +135,17 @@ Edit the variables at the top of the script if you need to change:
 
 After the script finishes, open **`https://<your‑machine‑IP>:8443`** in a browser. Because the certificate is self‑signed, the browser will display a warning; accept the exception (or import the cert into your trusted store for a smoother experience).
 
-### Password handling
-- **`--password <pw>`** – Supply a password for the Flask login page.  
-  If omitted, a **random URL‑safe password** will be generated, printed, and saved to `.secret_pass`.
+### Password handling (new `--password` option)
+- **`--password <pw>`** – Supply a password for the Flask login page.
+  - If you provide a value, that password will be required to log in.
+  - If you *omit* `--password`, the script will **generate a random, URL‑safe password**, print it (in red) and store it in a hidden file `.secret_pass`.
+  - You can also set the password via the environment variable `APP_PASSWORD` before running the script; the CLI argument takes precedence.
 - When the server starts, the password is printed **on its own line in red**:
   ```
   🔐  Password for the Flask app (generated or supplied):
   [31myourRandomPass[0m
   ```
-- Use `./https_simulator.sh show-pass` later to view the stored password (also red).
+- Use `./https_simulator.sh show-pass` at any time to view the stored password (also red).
 
 ## Connecting clients (web browsers)
 1. Open the page `http://<SERVER_IP>:5000` **or** `https://<SERVER_IP>:8443` (if you ran the HTTPS simulator) in **two or more** browsers (different computers, phones, or separate tabs).
