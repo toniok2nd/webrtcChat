@@ -82,14 +82,18 @@ eventlet==0.36.1    # async worker for SocketIO
 ```
 
 ## Running the signalling server directly
-If you just want to start the Flask app **without** HTTPS wrapping, you can run it directly.  The server accepts optional command‑line arguments to customise the STUN/TURN servers (defaults are shown in brackets):
+You can start the Flask app **without** the HTTPS wrapper.  The server accepts optional command‑line arguments to customise the STUN/TURN servers **and** an optional password for the login page:
+
 ```bash
 python app.py \
     --stun stun:stun.l.google.com:19302 \
     --turn turn:openrelay.metered.ca:80 \
     --turn-user openrelayproject \
-    --turn-pass openrelayproject
+    --turn-pass openrelayproject \
+    --password mySecretPass   # optional – omit to use a random generated password
 ```
+If `--password` is omitted, the app will generate a random URL‑safe password, print it on startup (in red) and store it in `.secret_pass` for later retrieval.
+
 The values are injected into the HTML page and become available to the JavaScript via the global `window.ICE_CONFIG` object.
 
 ## Running the tiny STUN server
@@ -103,7 +107,7 @@ python mini_stun_server.py [--host 0.0.0.0] [--port 3478]
 ## Running the HTTPS simulator (optional)
 `https_simulator.sh` is a convenience wrapper that:
 1. Generates a **self‑signed** certificate (once).
-2. Starts the Flask app **in the background**, passing along any arguments you give to the script (so you can configure STUN/TURN on the fly).
+2. Starts the Flask app **in the background**, passing along any arguments you give to the script (so you can configure STUN/TURN **and** the login password on the fly).
 3. Starts a **`socat` TLS terminator** listening on **port 8443** (configurable) and forwarding traffic to the Flask server.
 
 ### Basic usage
@@ -113,16 +117,18 @@ python mini_stun_server.py [--host 0.0.0.0] [--port 3478]
     --stun stun:stun.l.google.com:19302 \
     --turn turn:openrelay.metered.ca:80 \
     --turn-user openrelayproject \
-    --turn-pass openrelayproject
+    --turn-pass openrelayproject \
+    --password mySecretPass   # optional – omit to generate a random password
 ```
-You can omit the `--stun/--turn/...` options – the script will forward **no extra arguments**, and `app.py` will fall back to its built‑in defaults.
+If `--password` is omitted, the script will generate a random, URL‑safe password, **print it on its own line in red**, and store it in `.secret_pass`.
+You can also omit all STUN/TURN arguments – the script will forward no extra arguments and `app.py` will fall back to its built‑in defaults.
 
 ### Sub‑commands
 | Command | What it does |
 |---------|--------------|
 | `./https_simulator.sh start` (or just `./https_simulator.sh`) | Generates the cert if missing, launches Flask and `socat` in the background. Any additional arguments after the command are passed verbatim to `app.py`. |
 | `./https_simulator.sh stop` | Kills the Flask and `socat` processes started by the script. |
-| `./https_simulator.sh status` | Shows the PIDs of the running Flask and `socat` processes, or reports “none”. |
+| `./https_simulator.sh status` | Shows the PIDs of the running Flask and `socat` processes, or reports "none". |
 | `./https_simulator.sh show-pass` | Prints the stored password (if any) **in red** on its own line. |
 | `./https_simulator.sh --help` or `-h` | Displays a full usage message, including the new `--password` option. |
 
