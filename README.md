@@ -6,7 +6,7 @@
 - [Architecture diagram](#architecture-diagram)
 - [Prerequisites](#prerequisites)
 - [Installation](#installation)
-- [Running the signalling server](#running-the-signalling-server)
+- [Running the signalling server directly](#running-the-signalling-server-directly)
 - [Running the tiny STUN server](#running-the-tiny-stun-server)
 - [Running the HTTPS simulator (optional)](#running-the-https-simulator-optional)
 - [Connecting clients (web browsers)](#connecting-clients-web-browsers)
@@ -25,7 +25,7 @@ This repository contains a **minimal multi‑person WebRTC video‑chat demo** b
 | **Signalling server** | Flask + Flask‑SocketIO (Python) |
 | **Web UI** | HTML + JavaScript (plain, no framework) |
 | **STUN/TURN** | Tiny STUN server (`mini_stun_server.py`) + optional **coturn** relay |
-| **HTTPS helper** | `https_simulator.sh` – a tiny script that creates a self‑signed cert and runs a `socat` TLS terminator so you can serve the app over HTTPS (required for `getUserMedia` on non‑localhost domains) |
+| **HTTPS helper** | `https_simulator.sh` – a tiny script that creates a self‑signed certificate, runs the Flask app, and starts a `socat` TLS terminator so you can serve the app over HTTPS (required for `getUserMedia` on non‑localhost domains) |
 
 The demo now supports **any number of participants** (full‑mesh). Each participant creates a dedicated `RTCPeerConnection` for **every other participant**, and a separate `<video>` element is generated for each remote stream.
 
@@ -81,19 +81,15 @@ Flask‑SocketIO==5.3.6
 eventlet==0.36.1    # async worker for SocketIO
 ```
 
-## Running the signalling server
+## Running the signalling server directly
+If you just want to start the Flask app **without** HTTPS wrapping, you can run it directly.  The server accepts optional command‑line arguments to customise the STUN/TURN servers (defaults are shown in brackets):
 ```bash
-# Activate the virtualenv if not already active
-source venv/bin/activate   # Windows: venv\Scripts\activate
-
-# Start the server (debug mode prints lots of info)
-python app.py
+python app.py \
+    --stun stun:stun.l.google.com:19302 \
+    --turn turn:openrelay.metered.ca:80 \\n    --turn-user openrelayproject \
+    --turn-pass openrelayproject
 ```
-The server will listen on **`0.0.0.0:5000`** (plain HTTP).  Open a browser and go to:
-```
-http://localhost:5000
-```
-You should see the UI with a room‑name input.
+The values are injected into the HTML page and become available to the JavaScript via the global `window.ICE_CONFIG` object.
 
 ## Running the tiny STUN server
 The repo ships with `mini_stun_server.py`, a minimal STUN Binding‑Response implementation.
@@ -104,30 +100,26 @@ python mini_stun_server.py [--host 0.0.0.0] [--port 3478]
 *If you intend to reach the demo from the Internet, forward UDP 3478 from your router to the host running this script.*
 
 ## Running the HTTPS simulator (optional)
-If you want to serve the demo over **HTTPS** (required on many browsers for `getUserMedia` when you are not on `localhost`), use the provided `https_simulator.sh` script. It will:
-1. Generate a self‑signed certificate (if one does not already exist).
-2. Start the Flask app on `127.0.0.1:5000` in the background.
-3. Launch a `socat` TLS terminator that listens on **port 8443** and forwards decrypted traffic to the Flask server.
+`https_simulator.sh` is a convenience wrapper that:
+1. Generates a **self‑signed** certificate (once).
+2. Starts the Flask app **in the background**, passing along any arguments you give to the script (so you can configure STUN/TURN on the fly).
+3. Starts a **`socat` TLS terminator** listening on **port 8443** (configurable) and forwarding traffic to the Flask server.
 
 ### Basic usage
 ```bash
-# Start both Flask and the TLS proxy (the first time it will also create a cert)
-./https_simulator.sh start   # `start` is the default, you can omit it
+# Start Flask + HTTPS proxy (the first time it will also create a cert)
+./https_simulator.sh start \
+    --stun stun:stun.l.google.com:19302 \
+    --turn turn:openrelay.metered.ca:80 \
+    --turn-user openrelayproject \
+    --turn-pass openrelayproject
 ```
-You will see output similar to:
-```
-✅  Certificate and key written to ./certs
-🚀  Starting Flask app (http://127.0.0.1:5000) …
-✅  Flask PID = 12345 (logs → flask.log)
-🔗  Starting socat TLS proxy on https://0.0.0.0:8443 → http://127.0.0.1:5000
-✅  socat PID = 12346 (logs → socat.log)
-```
-Now open **`https://<your‑machine‑IP>:8443`** in a browser. The first visit will show a security warning because the certificate is self‑signed; accept the exception (or import the cert into your trusted store for a smoother experience).
+You can omit the `--stun/--turn/...` options – the script will forward **no extra arguments**, and `app.py` will fall back to its built‑in defaults.
 
 ### Sub‑commands
 | Command | What it does |
 |---------|--------------|
-| `./https_simulator.sh start` (or just `./https_simulator.sh`) | Generates cert if missing, launches Flask and `socat` in the background. |
+| `./https_simulator.sh start` (or just `./https_simulator.sh`) | Generates the cert if missing, launches Flask and `socat` in the background. Any additional arguments after the command are passed verbatim to `app.py`. |
 | `./https_simulator.sh stop` | Kills the Flask and `socat` processes started by the script. |
 | `./https_simulator.sh status` | Shows the PIDs of the running Flask and `socat` processes, or reports “none”. |
 
@@ -138,9 +130,7 @@ Edit the variables at the top of the script if you need to change:
 - `HTTPS_PORT` – the external TLS port (default `8443`).
 - `BIND_ADDR` – use `0.0.0.0` to allow LAN devices to connect via HTTPS.
 
-### Note on browsers
-- **Chrome/Edge/Firefox** will allow webcam access on `https://localhost:8443` after you accept the self‑signed warning.
-- If you access the demo from another device on the LAN, use the host’s LAN IP (e.g., `https://192.168.1.10:8443`). The same warning appears; accept it.
+After the script finishes, open **`https://<your‑machine‑IP>:8443`** in a browser. Because the certificate is self‑signed, the browser will display a warning; accept the exception (or import the cert into your trusted store for a smoother experience).
 
 ## Connecting clients (web browsers)
 1. Open the page `http://<SERVER_IP>:5000` **or** `https://<SERVER_IP>:8443` (if you ran the HTTPS simulator) in **two or more** browsers (different computers, phones, or separate tabs).

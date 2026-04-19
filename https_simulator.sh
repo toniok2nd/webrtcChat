@@ -39,7 +39,29 @@ _die() {
 # --------------------------------------------------------------
 # Sub‑command handling (start / stop / status)
 # --------------------------------------------------------------
-case "$1" in
+COMMAND="start"
+APP_ARGS=()
+
+while [[ "$#" -gt 0 ]]; do
+    case "$1" in
+        start|stop|status)
+            COMMAND="$1"
+            shift
+            ;;
+        --*)
+            # Anything that looks like an app.py argument is collected
+            APP_ARGS+=("$1")
+            shift
+            ;;
+        *)
+            # Positional arguments after the command are also passed through
+            APP_ARGS+=("$1")
+            shift
+            ;;
+    esac
+done
+
+case "$COMMAND" in
     stop)
         echo "Stopping Flask and socat processes..."
         pkill -f "python .*app\.py"
@@ -54,11 +76,11 @@ case "$1" in
         pgrep -a -f "socat .*OPENSSL-LISTEN:${HTTPS_PORT}" || echo "none"
         exit 0
         ;;
-    ""|start)
+    start|"")
         # continue with start routine
         ;;
     *)
-        _die "Usage: $0 [start|stop|status]"
+        _die "Usage: $0 [start|stop|status] [--stun ...] [--turn ...]"
         ;;
 esac
 
@@ -79,14 +101,18 @@ else
 fi
 
 # --------------------------------------------------------------
-# 2️⃣  Launch Flask app in background
+# 2️⃣  Launch Flask app in background, forwarding any extra args
 # --------------------------------------------------------------
 # If you use a virtual environment, activate it here:
 #   source venv/bin/activate
 # (Uncomment the line above if you have a venv.)
 
 echo "🚀  Starting Flask app (http://${FLASK_HOST}:${FLASK_PORT}) …"
-nohup python -u app.py > flask.log 2>&1 &
+# Build the command line for app.py, injecting any extra args the user supplied.
+# Example: ./https_simulator.sh start --stun stun:my.stun:3478 --turn turn:my.turn:3478 --turn-user foo --turn-pass bar
+
+# Append the collected arguments after "app.py"
+nohup python -u app.py "${APP_ARGS[@]}" > flask.log 2>&1 &
 FLASK_PID=$!
 echo "✅  Flask PID = $FLASK_PID (logs → flask.log)"
 
@@ -122,6 +148,11 @@ cat <<EOF
 * Logs:
       - Flask  → ./flask.log
       - socat  → ./socat.log
+
+* You can also pass any arguments accepted by `app.py` after the command.
+  Example:
+      $0 start --stun stun:my.stun:3478 --turn turn:my.turn:3478 \
+          --turn-user myuser --turn-pass mypass
 
 =====================================================================
 EOF

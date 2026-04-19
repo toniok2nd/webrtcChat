@@ -24,6 +24,21 @@
   <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"
           integrity="sha384-mZLF4UVrpi/QTWPA7BjNPEnkIfRFn4ZEO3Qt/HFklTJBj/gBOV8G3HcKn4NfQblz"
           crossorigin="anonymous"></script>
+
+  <!-- Pass ICE server configuration from Flask (via CLI args) to the browser -->
+  <script>
+    window.ICE_CONFIG = {
+      iceServers: [
+        { urls: "{{ STUN_URL }}" },
+        {
+          urls: "{{ TURN_URL }}",
+          username: "{{ TURN_USER }}",
+          credential: "{{ TURN_PASS }}"
+        }
+      ]
+    };
+  </script>
+
   <script src="{{ url_for('static', filename='main.js') }}"></script>
 </body>
 </html>
