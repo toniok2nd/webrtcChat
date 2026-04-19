@@ -2,30 +2,31 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>Flask WebRTC – Multi‑person video room</title>
+  <title>💙👽 Alien WebRTC Fiesta – Beam Up!</title>
+  <!-- Font Awesome for icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" integrity="sha512-..." crossorigin="anonymous" referrerpolicy="no-referrer" />
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
-  <h1>Flask WebRTC Demo</h1>
+  <h1><i class="fas fa-robot" style="color:#00bcd4;"></i> Alien WebRTC Fiesta <i class="fas fa-robot" style="color:#00bcd4;"></i></h1>
+  <p class="tagline">Enter the cosmic lounge – video chat across the galaxy.</p>
 
   <div id="room-selection">
-    <input id="room-input" type="text" placeholder="Enter a room name">
-    <button id="join-btn">Join room</button>
+    <input id="room-input" type="text" placeholder="🌐 Enter a room name..." />
+    <button id="join-btn" class="green-btn"><i class="fas fa-play"></i> Beam me up</button>
   </div>
 
   <div id="video-container" style="display:none;">
     <video id="localVideo" autoplay muted playsinline></video>
-    <!-- Container for all remote participants -->
     <div id="remoteContainer"></div>
     <p>Room: <span id="room-label"></span></p>
-    <button id="leave-btn">Leave room</button>
+    <button id="leave-btn" class="green-btn"><i class="fas fa-door-open"></i> Exit base</button>
   </div>
 
   <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"
           integrity="sha384-mZLF4UVrpi/QTWPA7BjNPEnkIfRFn4ZEO3Qt/HFklTJBj/gBOV8G3HcKn4NfQblz"
           crossorigin="anonymous"></script>
 
-  <!-- Pass ICE server configuration from Flask (via CLI args) to the browser -->
   <script>
     window.ICE_CONFIG = {
       iceServers: [

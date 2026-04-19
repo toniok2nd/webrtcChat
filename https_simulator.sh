@@ -37,16 +37,56 @@ _die() {
 }
 
 # --------------------------------------------------------------
-# Sub‑command handling (start / stop / status)
+# Help text
 # --------------------------------------------------------------
+_show_help() {
+    cat <<EOF
+Usage: $0 [start|stop|status|show-pass|--help] [options]
+
+Commands:
+  start        Start Flask + socat (default command)
+  stop         Stop the running Flask and socat processes
+  status       Show which Flask/socat processes are running
+  show-pass    Show the stored password (if any)
+  --help, -h  Show this help message
+
+Options (only for the "start" command):
+  --stun <url>        STUN server URL (default: stun:stun.l.google.com:19302)
+  --turn <url>        TURN server URL (default: turn:openrelay.metered.ca:80)
+  --turn-user <user>  TURN username (default: openrelayproject)
+  --turn-pass <pass>  TURN password (default: openrelayproject)
+  --password <pw>     Password for the Flask login page.
+                       If omitted, a random password will be generated and saved.
+EOF
+}
+
+# --------------------------------------------------------------
+# Sub‑command handling (start / stop / status / show-pass / help)
+# --------------------------------------------------------------
+# Detect help request early
+if [[ "$1" == "--help" || "$1" == "-h" ]]; then
+    _show_help
+    exit 0
+fi
+
 COMMAND="start"
 APP_ARGS=()
+PASSWORD_ARG=""
 
 while [[ "$#" -gt 0 ]]; do
     case "$1" in
-        start|stop|status)
+        start|stop|status|show-pass)
             COMMAND="$1"
             shift
+            ;;
+        --password)
+            # Capture the next argument as the password value
+            if [[ -n "$2" && "$2" != --* ]]; then
+                PASSWORD_ARG="--password $2"
+                shift 2
+            else
+                _die "--password requires a value"
+            fi
             ;;
         --*)
             # Anything that looks like an app.py argument is collected
@@ -76,11 +116,19 @@ case "$COMMAND" in
         pgrep -a -f "socat .*OPENSSL-LISTEN:${HTTPS_PORT}" || echo "none"
         exit 0
         ;;
+    show-pass)
+        if [[ -f ".secret_pass" ]]; then
+            echo -e "🔐  Current password for the Flask app: \e[31m$(cat .secret_pass)\e[0m"
+        else
+            echo "⚠️  No password file found. The server may not have been started yet."
+        fi
+        exit 0
+        ;;
     start|"")
         # continue with start routine
         ;;
     *)
-        _die "Usage: $0 [start|stop|status] [--stun ...] [--turn ...]"
+        _die "Usage: $0 [start|stop|status|show-pass|--help] [options]"
         ;;
 esac
 
@@ -108,10 +156,11 @@ fi
 # (Uncomment the line above if you have a venv.)
 
 echo "🚀  Starting Flask app (http://${FLASK_HOST}:${FLASK_PORT}) …"
+# Append any password argument to the APP_ARGS so app.py receives it
+if [[ -n "$PASSWORD_ARG" ]]; then
+    APP_ARGS+=("$PASSWORD_ARG")
+fi
 # Build the command line for app.py, injecting any extra args the user supplied.
-# Example: ./https_simulator.sh start --stun stun:my.stun:3478 --turn turn:my.turn:3478 --turn-user foo --turn-pass bar
-
-# Append the collected arguments after "app.py"
 nohup python -u app.py "${APP_ARGS[@]}" > flask.log 2>&1 &
 FLASK_PID=$!
 echo "✅  Flask PID = $FLASK_PID (logs → flask.log)"
@@ -128,7 +177,14 @@ SOCAT_PID=$!
 echo "✅  socat PID = $SOCAT_PID (logs → socat.log)"
 
 # --------------------------------------------------------------
-# 4️⃣  Brief user info
+# 4️⃣  Show the password (if we have it) – in its own red line
+# --------------------------------------------------------------
+if [[ -f ".secret_pass" ]]; then
+    echo -e "\n🔐  Password for the Flask app (generated or supplied):\n\e[31m$(cat .secret_pass)\e[0m"
+fi
+
+# --------------------------------------------------------------
+# 5️⃣  Brief user info
 # --------------------------------------------------------------
 cat <<EOF
 
@@ -144,6 +200,9 @@ cat <<EOF
 
 * To see which processes are still running:
       $0 status
+
+* To view the current password (if any):
+      $0 show-pass
 
 * Logs:
       - Flask  → ./flask.log

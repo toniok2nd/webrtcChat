@@ -25,9 +25,9 @@ This repository contains a **minimal multi‑person WebRTC video‑chat demo** b
 | **Signalling server** | Flask + Flask‑SocketIO (Python) |
 | **Web UI** | HTML + JavaScript (plain, no framework) |
 | **STUN/TURN** | Tiny STUN server (`mini_stun_server.py`) + optional **coturn** relay |
-| **HTTPS helper** | `https_simulator.sh` – a tiny script that creates a self‑signed certificate, runs the Flask app, and starts a `socat` TLS terminator so you can serve the app over HTTPS (required for `getUserMedia` on non‑localhost domains) |
+| **HTTPS helper** | `https_simulator.sh` – creates a self‑signed certificate, runs Flask, and starts a `socat` TLS terminator for HTTPS (required for `getUserMedia` on non‑localhost domains) |
 
-The demo now supports **any number of participants** (full‑mesh). Each participant creates a dedicated `RTCPeerConnection` for **every other participant**, and a separate `<video>` element is generated for each remote stream.
+The demo now supports **any number of participants** (full‑mesh). Each participant creates a dedicated `RTCPeerConnection` for every other participant, and a separate `<video>` element is generated for each remote stream.
 
 ## Features
 - **Full‑mesh** WebRTC: every user gets a direct peer‑to‑peer connection to every other user.
@@ -51,8 +51,8 @@ The demo now supports **any number of participants** (full‑mesh). Each partici
 |   Browser B      |  <-------------------------------------  | mini_stun_server |
 +-------------------+                                          +-------------------+
 ```
-*All media traffic (audio/video) flows **directly** between browsers once ICE succeeds.
-*The STUN server is only used for the *host‑candidate* discovery; media is never relayed through it.
+*All media traffic (audio/video) flows **directly** between browsers once ICE succeeds.*
+*The STUN server is only used for *host‑candidate* discovery; media is never relayed through it.*
 
 ## Prerequisites
 - Python 3.8 or newer
@@ -74,7 +74,7 @@ source venv/bin/activate   # Windows: venv\Scripts\activate
 # Install Python dependencies
 pip install -r requirements.txt
 ```
-The `requirements.txt` contains:
+`requirements.txt` contains:
 ```
 Flask==3.0.3
 Flask‑SocketIO==5.3.6
@@ -86,7 +86,8 @@ If you just want to start the Flask app **without** HTTPS wrapping, you can run 
 ```bash
 python app.py \
     --stun stun:stun.l.google.com:19302 \
-    --turn turn:openrelay.metered.ca:80 \\n    --turn-user openrelayproject \
+    --turn turn:openrelay.metered.ca:80 \
+    --turn-user openrelayproject \
     --turn-pass openrelayproject
 ```
 The values are injected into the HTML page and become available to the JavaScript via the global `window.ICE_CONFIG` object.
@@ -122,6 +123,8 @@ You can omit the `--stun/--turn/...` options – the script will forward **no ex
 | `./https_simulator.sh start` (or just `./https_simulator.sh`) | Generates the cert if missing, launches Flask and `socat` in the background. Any additional arguments after the command are passed verbatim to `app.py`. |
 | `./https_simulator.sh stop` | Kills the Flask and `socat` processes started by the script. |
 | `./https_simulator.sh status` | Shows the PIDs of the running Flask and `socat` processes, or reports “none”. |
+| `./https_simulator.sh show-pass` | Prints the stored password (if any) **in red** on its own line. |
+| `./https_simulator.sh --help` or `-h` | Displays a full usage message, including the new `--password` option. |
 
 ### Customisation
 Edit the variables at the top of the script if you need to change:
@@ -131,6 +134,16 @@ Edit the variables at the top of the script if you need to change:
 - `BIND_ADDR` – use `0.0.0.0` to allow LAN devices to connect via HTTPS.
 
 After the script finishes, open **`https://<your‑machine‑IP>:8443`** in a browser. Because the certificate is self‑signed, the browser will display a warning; accept the exception (or import the cert into your trusted store for a smoother experience).
+
+### Password handling
+- **`--password <pw>`** – Supply a password for the Flask login page.  
+  If omitted, a **random URL‑safe password** will be generated, printed, and saved to `.secret_pass`.
+- When the server starts, the password is printed **on its own line in red**:
+  ```
+  🔐  Password for the Flask app (generated or supplied):
+  [31myourRandomPass[0m
+  ```
+- Use `./https_simulator.sh show-pass` later to view the stored password (also red).
 
 ## Connecting clients (web browsers)
 1. Open the page `http://<SERVER_IP>:5000` **or** `https://<SERVER_IP>:8443` (if you ran the HTTPS simulator) in **two or more** browsers (different computers, phones, or separate tabs).
@@ -190,7 +203,7 @@ The client will automatically fall back to the TURN relay if direct peer‑to‑
 | `Cannot set remote answer in state stable` | Old code attempted to set an answer before a local offer existed. | Updated `main.js` now checks `signalingState` before applying SDP. |
 | `Socket.IO connection error` | Server not reachable, CORS, wrong port | Ensure Flask is running on `0.0.0.0:5000`, firewall allows TCP 5000, and the page uses the correct address. |
 | STUN server logs “Invalid STUN packet” | Test client sent a malformed packet (e.g., wrong magic cookie) | Use a proper STUN client (`pystun3`, browser ICE). |
-| Browser warns about self‑signed cert when using HTTPS simulator | The cert is self‑signed; you need to accept the exception or import it into the trusted store. |
+| Browser warns about self‑signed cert when using HTTPS simulator | The cert is self‑signed; you need to accept the exception or import it into the trusted store. | Click “Advanced → Proceed anyway” (Chrome) or add the cert to system trust store. |
 
 ## License
 This repository is released under the **MIT License** – you are free to use, modify, and distribute it.

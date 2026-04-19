@@ -3,3 +3,4 @@ certs/
 .hello
 *log
 .historyList.json
+.secret_pass

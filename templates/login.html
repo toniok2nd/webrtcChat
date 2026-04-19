@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>🔐 Login – Flirty WebRTC Fiesta</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <h1><i class="fas fa-cat" style="color:#e91e63;"></i> Login to the Party <i class="fas fa-cat" style="color:#e91e63;"></i></h1>
+  {% if error %}
+    <p style="color:red;">{{ error }}</p>
+  {% endif %}
+  <form method="post" action="{{ url_for('login') }}">
+    <input type="password" name="password" placeholder="Enter password" required />
+    <button type="submit" class="green-btn"><i class="fas fa-key"></i> Enter</button>
+  </form>
+</body>
+</html>
